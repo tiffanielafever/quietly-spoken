@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { BRAND } from '../brand';
 import { renderCleanWav } from '../lib/dsp';
@@ -28,22 +28,80 @@ async function decodeAudio(file: File): Promise<AudioBuffer> {
 }
 
 const button = 'rounded-xl border border-line bg-card px-3 py-2 text-sm text-paper hover:border-stone';
+const activeButton = 'rounded-xl border border-amber bg-amber px-3 py-2 text-sm font-semibold text-[#1a140d]';
+
+type Mode = 'original' | 'cleaned';
 
 export default function StudioPage() {
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  const [cleanUrl, setCleanUrl] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>('cleaned');
   const [showVideo, setShowVideo] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Choose a camera video (.mp4 or .mov) to begin.');
 
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  useEffect(() => () => { if (cleanUrl) URL.revokeObjectURL(cleanUrl); }, [cleanUrl]);
+
+  // Keeps the video picture on one clock and the cleaned audio on a second element.
+  // Original mode plays the video's own audio. Cleaned mode mutes the video and plays the WAV in sync.
+  useEffect(() => {
+    const v = videoRef.current;
+    const a = audioRef.current;
+    if (!v) return;
+
+    v.muted = mode === 'cleaned';
+    if (!a || !cleanUrl) return;
+
+    const sync = () => {
+      if (Math.abs(a.currentTime - v.currentTime) > 0.05) a.currentTime = v.currentTime;
+    };
+    const startAudio = () => {
+      if (mode !== 'cleaned' || v.paused) return;
+      sync();
+      a.playbackRate = v.playbackRate;
+      a.play().catch(() => undefined);
+    };
+
+    // Apply the current state immediately, in case mode changed while playing
+    if (mode === 'original' || v.paused) a.pause();
+    else startAudio();
+
+    const onPlay = () => startAudio();
+    const onPause = () => a.pause();
+    const onSeeked = () => sync();
+    const onRate = () => { a.playbackRate = v.playbackRate; };
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+    v.addEventListener('ratechange', onRate);
+
+    // Re-sync every 2 seconds so the two tracks don't drift apart
+    const id = window.setInterval(() => {
+      if (mode === 'cleaned' && !v.paused) sync();
+    }, 2000);
+
+    return () => {
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPause);
+      v.removeEventListener('seeked', onSeeked);
+      v.removeEventListener('ratechange', onRate);
+      window.clearInterval(id);
+    };
+  }, [mode, cleanUrl, url, showVideo]);
 
   const pick = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setFile(f);
     setUrl(URL.createObjectURL(f));
+    setCleanUrl(null);
+    setMode('cleaned');
     setStatus(`Loaded ${f.name}. Export the cleaned video or the WAV.`);
   };
 
@@ -59,15 +117,19 @@ export default function StudioPage() {
       setStatus('Rendering full track...');
       const wav = await renderCleanWav([L, R], buf.sampleRate, (p) => setProgress(Math.round(p * span)));
       const base = file.name.replace(/\.[^.]+$/, '');
+
+      // Keep the cleaned audio so the before/after preview is available right away
+      setCleanUrl(URL.createObjectURL(wav));
+      setMode('cleaned');
+
       if (kind === 'wav') {
         download(wav, `${base}_Quietly_Cleaned.wav`);
-
-        setStatus('Cleaned stereo WAV exported.');
+        setStatus('Cleaned stereo WAV exported. Use Original / Cleaned to compare.');
       } else {
         setStatus('Remuxing video stream (zero re-encoding, 100% original video quality)...');
         const mp4 = await remuxCleanMp4(file, wav, (p) => setProgress(span + Math.round(p * 50)));
         download(mp4, `${base}_Quietly_Clean.mp4`);
-        setStatus('Clean MP4 exported.');
+        setStatus('Clean MP4 exported. Use Original / Cleaned to compare.');
       }
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
@@ -76,6 +138,12 @@ export default function StudioPage() {
       setBusy(false);
       setProgress(0);
     }
+  };
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    const v = videoRef.current;
+    if (v) v.muted = next === 'cleaned';
   };
 
   return (
@@ -97,14 +165,29 @@ export default function StudioPage() {
           </button>
         </div>
 
-        {url && showVideo && (
-          <video
-            src={url}
-            muted
-            playsInline
-            controls
-            className="mt-4 aspect-video max-h-[180px] w-full rounded-xl bg-black object-contain"
-          />
+        {url && (
+          <div className={showVideo ? 'mt-4' : 'hidden'}>
+            <video
+              ref={videoRef}
+              src={url}
+              playsInline
+              controls
+              className="aspect-video max-h-[180px] w-full rounded-xl bg-black object-contain"
+            />
+          </div>
+        )}
+        {cleanUrl && <audio ref={audioRef} src={cleanUrl} preload="auto" />}
+
+        {cleanUrl && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span className="text-sm text-stone">Compare:</span>
+            <button type="button" className={mode === 'original' ? activeButton : button} onClick={() => switchMode('original')}>
+              Original
+            </button>
+            <button type="button" className={mode === 'cleaned' ? activeButton : button} onClick={() => switchMode('cleaned')}>
+              Cleaned
+            </button>
+          </div>
         )}
 
         <div className="mt-5 flex flex-wrap gap-3">
