@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { BRAND } from '../brand';
 import { renderCleanWav } from '../lib/dsp';
 import { extractAudioWav, remuxCleanMp4 } from '../lib/ffmpegRemux';
+import { learnNoiseProfile, reduceRoomNoise } from '../lib/roomNoise';
 
 function download(blob: Blob, name: string) {
   const a = document.createElement('a');
@@ -61,6 +62,7 @@ const activeButton = 'rounded-xl border border-amber bg-amber px-3 py-2 text-sm 
 type Mode = 'original' | 'cleaned';
 type Track = 'orig' | 'clean';
 type Voice = { src: AudioBufferSourceNode; env: GainNode };
+type Profile = { left: Float64Array; right: Float64Array };
 
 export default function StudioPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -71,6 +73,10 @@ export default function StudioPage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Choose a camera video (.mp4 or .mov) to begin.');
+  const [noiseFrom, setNoiseFrom] = useState('0');
+  const [noiseTo, setNoiseTo] = useState('3');
+  const [noiseLearned, setNoiseLearned] = useState(false);
+  const [reductionDb, setReductionDb] = useState(10);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -81,6 +87,7 @@ export default function StudioPage() {
   const voicesRef = useRef<Voice[]>([]);
   const startRef = useRef({ ctxTime: 0, mediaTime: 0, rate: 1 });
   const driftTimerRef = useRef<number | null>(null);
+  const profileRef = useRef<Profile | null>(null);
 
   const getCtx = () => {
     if (!ctxRef.current) ctxRef.current = new AudioContext();
@@ -220,6 +227,12 @@ export default function StudioPage() {
     if (v && !v.paused) startVoices(v.currentTime, v.playbackRate);
   };
 
+  // A learned profile belongs to one stretch of one file, so changing either clears it.
+  const clearProfile = () => {
+    profileRef.current = null;
+    setNoiseLearned(false);
+  };
+
   const pick = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -233,12 +246,39 @@ export default function StudioPage() {
     modeRef.current = 'cleaned';
     buffersRef.current = {};
     trackGainsRef.current = {};
+    clearProfile();
     setStatus(`Loaded ${f.name}. Decoding original audio...`);
     try {
       buffersRef.current.orig = await decodeAudio(f);
-      setStatus(`Loaded ${f.name}. Export the cleaned video or the WAV to compare.`);
+      setStatus(`Loaded ${f.name}. Learn the room noise if you want it removed, then export.`);
     } catch {
       setStatus(`Loaded ${f.name}. Could not decode the original audio for compare.`);
+    }
+  };
+
+  // Learns the steady noise from the stretch you chose, using the decoded original.
+  const learnNoise = () => {
+    const orig = buffersRef.current.orig;
+    if (!orig) {
+      setStatus('Load a clip first. The room noise is learned from it.');
+      return;
+    }
+    const from = Number(noiseFrom);
+    const to = Number(noiseTo);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to > orig.duration || to - from < 0.5) {
+      setStatus(`Pick a stretch of at least 0.5 seconds, between 0 and ${orig.duration.toFixed(1)} seconds.`);
+      return;
+    }
+    try {
+      const left = learnNoiseProfile(orig.getChannelData(0), orig.sampleRate, from, to);
+      const right = orig.numberOfChannels > 1
+        ? learnNoiseProfile(orig.getChannelData(1), orig.sampleRate, from, to)
+        : left;
+      profileRef.current = { left, right };
+      setNoiseLearned(true);
+      setStatus(`Room noise learned from ${from.toFixed(1)} to ${to.toFixed(1)} seconds. Export to apply it.`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Could not learn the room noise.');
     }
   };
 
@@ -248,8 +288,21 @@ export default function StudioPage() {
     try {
       setStatus('Decoding audio...');
       const buf = await decodeAudio(file);
-      const L = new Float32Array(buf.getChannelData(0));
-      const R = buf.numberOfChannels > 1 ? new Float32Array(buf.getChannelData(1)) : new Float32Array(L);
+      const stereo = buf.numberOfChannels > 1;
+      let L = new Float32Array(buf.getChannelData(0));
+      let R = stereo ? new Float32Array(buf.getChannelData(1)) : new Float32Array(L);
+
+      // Room-noise removal runs first, so the cleaning chain below works on the quieter signal.
+      const profile = profileRef.current;
+      if (profile) {
+        setStatus('Removing room noise...');
+        const split = stereo ? 50 : 100;
+        L = await reduceRoomNoise(L, profile.left, reductionDb, (p) => setProgress(Math.round(p * split)));
+        R = stereo
+          ? await reduceRoomNoise(R, profile.right, reductionDb, (p) => setProgress(split + Math.round(p * (100 - split))))
+          : L;
+      }
+
       const span = kind === 'mp4' ? 50 : 100;
       setStatus('Rendering full track...');
       const wav = await renderCleanWav([L, R], buf.sampleRate, (p) => setProgress(Math.round(p * span)));
@@ -320,14 +373,76 @@ export default function StudioPage() {
         {cleanReady && (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <span className="text-sm text-stone">Compare:</span>
-            <button type="button" className={mode === 'original' ? activeButton : button} onClick={() => applyMode('original')}>
+            <button
+              type="button"
+              className={mode === 'original' ? activeButton : button}
+              onClick={() => applyMode('original')}
+            >
               Original
             </button>
-            <button type="button" className={mode === 'cleaned' ? activeButton : button} onClick={() => applyMode('cleaned')}>
+            <button
+              type="button"
+              className={mode === 'cleaned' ? activeButton : button}
+              onClick={() => applyMode('cleaned')}
+            >
               Cleaned
             </button>
           </div>
         )}
+
+        <div className="mt-5 rounded-xl border border-line p-4">
+          <p className="text-sm text-paper">Room noise (optional)</p>
+          <p className="mt-1 text-xs text-stone">
+            Choose a stretch with only the steady sound, like an AC or fan, and no voice. Then learn it before exporting.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-stone">
+            <label className="flex items-center gap-2">
+              From
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={noiseFrom}
+                onChange={(e) => { setNoiseFrom(e.target.value); clearProfile(); }}
+                className="w-20 rounded border border-line bg-[#121110] px-2 py-1 text-paper"
+              />
+              s
+            </label>
+            <label className="flex items-center gap-2">
+              To
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={noiseTo}
+                onChange={(e) => { setNoiseTo(e.target.value); clearProfile(); }}
+                className="w-20 rounded border border-line bg-[#121110] px-2 py-1 text-paper"
+              />
+              s
+            </label>
+            <button type="button" className={button} disabled={!file || busy} onClick={learnNoise}>
+              Learn room noise
+            </button>
+            <span>{noiseLearned ? 'Learned' : 'Not learned yet'}</span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-stone">
+            <label className="flex items-center gap-3">
+              Reduction
+              <input
+                type="range"
+                min={0}
+                max={18}
+                step={1}
+                value={reductionDb}
+                onChange={(e) => setReductionDb(Number(e.target.value))}
+              />
+              <span className="w-14 text-paper">{reductionDb} dB</span>
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-stone">
+            Higher reduction removes more of the steady sound but can thin whispers. Start at 10 dB and listen.
+          </p>
+        </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button
