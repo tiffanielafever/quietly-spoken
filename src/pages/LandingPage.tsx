@@ -136,7 +136,7 @@ const FLOW = [
 
 // Placeholder tiers: replace names, prices, and notes with the final plan before launch.
 const PRICING = [
-  { name: 'Preview', price: '$0', note: '15-second preview windows and WAV export' },
+  { name: 'Preview', price: '$0', note: '30-second previews. No full exports.' },
   { name: 'Creator', price: '$12 / mo', note: 'Full-track WAV and clean MP4 export' },
   { name: 'Studio', price: '$29 / mo', note: 'Everything in Creator, for long-form projects' },
 ] as const;
