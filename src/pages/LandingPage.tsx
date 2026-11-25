@@ -115,19 +115,22 @@ function HeadphoneConsole() {
       <p className="mt-4 text-sm text-stone">
         Hum and hiss are synthesized in your browser. Sound starts only when you press the button.
       </p>
+      <p className="mt-2 text-xs text-stone">
+        A simplified demo with synthesized hiss and hum at 60, 120, and 180 Hz. The app itself uses four notches, including 240 Hz, and works on real recordings.
+      </p>
     </div>
   );
 }
 
 const PAIN = [
-  ['Fridge hum under every whisper', 'Narrow notches at 60 Hz and its harmonics leave the warmth of the voice intact.'],
+  ['Fridge hum under every whisper', 'Narrow notches target the 60 Hz hum and its harmonics, and leave most of the voice untouched.'],
   ['Mouth clicks that jump the meter', 'Repairs run up to 3 ms long. The detector listens between 1.2 and 4.5 kHz, where wet clicks live.'],
   ['Hiss in the quiet parts', 'One stereo-linked expander moves both ears together, so the image does not wobble.'],
 ] as const;
 
 const FLOW = [
   ['Video', 'Stream copied bit for bit. Never re-encoded.'],
-  ['Audio', 'Cleaned on your device, then encoded to AAC at 320 kbps.'],
+  ['Audio', 'Video exports keep your picture and replace the sound with cleaned AAC at 320 kbps. WAV exports are uncompressed 16-bit stereo.'],
   ['Files', 'Decoded and processed locally. Nothing is uploaded.'],
 ] as const;
 
