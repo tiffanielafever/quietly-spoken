@@ -1,11 +1,13 @@
+;
+  }
 import Stripe from 'stripe';
 
-const PRICE_ID = 'price_1Ug4zSKG8OZ9PKbL7tGi23DA';
+const PRICE_ID = 'price_1UfqvrGnhZt04oIRRxwZqBIb';
 const SITE = 'https://www.quietlyspoken.app';
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
+    res.status(200).json({ url: session.url });
   }
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {
