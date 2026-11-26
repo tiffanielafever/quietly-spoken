@@ -12,7 +12,22 @@ function download(blob: Blob, name: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
+// Free-tier preview limit. Set FREE_TIER to false to test full exports.
+const FREE_TIER = true;
+const FREE_PREVIEW_S = 30;
 
+// Keeps only the first seconds of a buffer for the free tier.
+function clipForTier(buf: AudioBuffer): AudioBuffer {
+  if (!FREE_TIER) return buf;
+  const frames = Math.min(buf.length, Math.round(FREE_PREVIEW_S * buf.sampleRate));
+  if (frames === buf.length) return buf;
+  const ctx = new OfflineAudioContext(buf.numberOfChannels, frames, buf.sampleRate);
+  const out = ctx.createBuffer(buf.numberOfChannels, frames, buf.sampleRate);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    out.getChannelData(c).set(buf.getChannelData(c).subarray(0, frames));
+  }
+  return out;
+}
 // Native decode first. FFmpeg extracts the audio track only when the browser cannot read the container.
 async function decodeAudio(file: File): Promise<AudioBuffer> {
   const ctx = new AudioContext();
@@ -249,7 +264,7 @@ export default function StudioPage() {
     clearProfile();
     setStatus(`Loaded ${f.name}. Decoding original audio...`);
     try {
-      buffersRef.current.orig = await decodeAudio(f);
+      buffersRef.current.orig = clipForTier(await decodeAudio(f));
       setStatus(`Loaded ${f.name}. Learn the room noise if you want it removed, then export.`);
     } catch {
       setStatus(`Loaded ${f.name}. Could not decode the original audio for compare.`);
@@ -287,7 +302,7 @@ export default function StudioPage() {
     setBusy(true);
     try {
       setStatus('Decoding audio...');
-      const buf = await decodeAudio(file);
+      const buf = clipForTier(await decodeAudio(file));
       const stereo = buf.numberOfChannels > 1;
       let L = new Float32Array(buf.getChannelData(0));
       let R = stereo ? new Float32Array(buf.getChannelData(1)) : new Float32Array(L);
@@ -447,7 +462,7 @@ export default function StudioPage() {
         <div className="mt-5 flex flex-wrap gap-3">
           <button
             type="button"
-            disabled={!file || busy}
+            disabled={!file || busy || FREE_TIER}
             onClick={() => run('mp4')}
             className="rounded-xl bg-amber px-4 py-2 font-semibold text-[#1a140d] disabled:opacity-40"
           >
