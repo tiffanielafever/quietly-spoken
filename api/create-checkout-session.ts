@@ -12,9 +12,9 @@ export default async function handler(req: Request): Promise<Response> {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {
     console.error('STRIPE_SECRET_KEY is not set');
-    return new Response('Server is missing its Stripe key', { status: 500 });
+        res.status(500).json({ error: 'Server is missing its Stripe key' });
   }
-  try {
+    try {
     const stripe = new Stripe(key);
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -22,9 +22,8 @@ export default async function handler(req: Request): Promise<Response> {
       success_url: `${SITE}/studio?checkout=success`,
       cancel_url: `${SITE}/studio?checkout=cancel`,
     });
-    return Response.redirect(session.url!, 303);
+    return res.redirect(303, session.url!);
   } catch (err) {
     console.error('Checkout error', err);
-    return new Response('Could not start checkout', { status: 500 });
+    return res.status(500).json({ error: 'Could not start checkout' });
   }
-}
