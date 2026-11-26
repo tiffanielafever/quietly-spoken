@@ -30,4 +30,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('Checkout error', err);
     return res.status(500).json({ error: 'Could not start checkout' });
   }
+export default function handler(req: any, res: any) {
+  res.status(200).json({ ok: true });
 }
