@@ -354,6 +354,7 @@ export default function StudioPage() {
     <main className="mx-auto max-w-3xl px-5 pt-6 pb-20">
       <Link to="/" className="text-sm text-stone hover:text-paper">← Back to Overview</Link>
       <h1 className="mt-6 font-serif text-4xl">{BRAND.name} Studio</h1>
+      <div className="mt-6"><SubscribeButton /></div>
       <p className="mt-2 text-stone">Local restoration. Your files never leave this browser.</p>
 
       <section className="mt-8 rounded-2xl border border-line bg-card p-5">
