@@ -45,3 +45,4 @@ export default async function handler(req: any, res: any) {
     console.error('Checkout error', err);
     return res.status(500).json({ error: 'Could not start checkout' });
   }
+}
