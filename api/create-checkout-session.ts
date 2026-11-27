@@ -1,7 +1,7 @@
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-const PRICE_ID = 'price_1UfqvrGnhZt04oIRRxwZqBIb';
+const PRICE_ID = 'price_1UgPCOKG8OZ9PKbLjiHG4ggu';
 const SITE = 'https://www.quietlyspoken.app';
 
 export default async function handler(req: any, res: any) {
