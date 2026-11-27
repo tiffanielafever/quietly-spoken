@@ -9,6 +9,19 @@ async function readRawBody(req: any): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+async function upsertSubscription(supabase: any, userId: string, sub: any) {
+  const periodEnd = sub.current_period_end ?? sub.items?.data?.[0]?.current_period_end;
+  const { error } = await supabase.from('subscriptions').upsert({
+    user_id: userId,
+    stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : sub.customer?.id,
+    stripe_subscription_id: sub.id,
+    status: sub.status,
+    current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -32,7 +45,7 @@ export default async function handler(req: any, res: any) {
   const signature = req.headers['stripe-signature'];
   const rawBody = await readRawBody(req);
 
-  let event: Stripe.Event;
+  let event: any;
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
   } catch (err) {
@@ -42,7 +55,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
+      const session = event.data.object;
       const userId = session.client_reference_id;
       if (userId && session.subscription) {
         const sub = await stripe.subscriptions.retrieve(session.subscription as string);
@@ -54,10 +67,10 @@ export default async function handler(req: any, res: any) {
       event.type === 'customer.subscription.updated' ||
       event.type === 'customer.subscription.deleted'
     ) {
-      const sub = event.data.object as Stripe.Subscription;
+      const sub = event.data.object;
       const userId = sub.metadata?.supabase_user_id;
       if (userId) {
-        await upsertSubscription(supabase, userId, event.type.endsWith('deleted') ? { ...sub, status: 'canceled' } as Stripe.Subscription : sub);
+        await upsertSubscription(supabase, userId, sub);
       }
     }
 
@@ -66,16 +79,4 @@ export default async function handler(req: any, res: any) {
     console.error('Webhook handler error', err);
     return res.status(500).end();
   }
-}
-
-async function upsertSubscription(supabase: any, userId: string, sub: Stripe.Subscription) {
-  const { error } = await supabase.from('subscriptions').upsert({
-    user_id: userId,
-    stripe_customer_id: sub.customer as string,
-    stripe_subscription_id: sub.id,
-    status: sub.status,
-    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  });
-  if (error) throw error;
 }
